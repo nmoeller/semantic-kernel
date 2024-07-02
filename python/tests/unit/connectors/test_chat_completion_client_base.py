@@ -12,6 +12,7 @@ from semantic_kernel.connectors.ai.chat_completion_client_base import ChatComple
 from semantic_kernel.connectors.ai.function_choice_behavior import FunctionChoiceBehavior, FunctionChoiceType
 from semantic_kernel.connectors.ai.mistral_ai import MistralAIChatCompletion, MistralAIChatPromptExecutionSettings
 from semantic_kernel.connectors.ai.ollama import OllamaChatCompletion, OllamaPromptExecutionSettings
+from semantic_kernel.connectors.ai.open_ai import OpenAIChatCompletion, OpenAIChatPromptExecutionSettings
 from semantic_kernel.connectors.ai.prompt_execution_settings import PromptExecutionSettings
 from semantic_kernel.contents.chat_history import ChatHistory
 from semantic_kernel.contents.chat_message_content import (
@@ -53,6 +54,36 @@ pytestmark = pytest.mark.parametrize('completion_object , prompt_execution_setti
         ),
         True,
         id="mistral_tool_none_invoke"
+    ),
+    pytest.param(
+        OpenAIChatCompletion(),
+        OpenAIChatPromptExecutionSettings(),
+        True,
+        id="open_ai_none_settings"
+    ),
+    pytest.param(
+        OpenAIChatCompletion(),
+        OpenAIChatPromptExecutionSettings(
+            function_choice_behavior=FunctionChoiceBehavior.Auto()
+        ),
+        True,
+        id="open_ai_auto"
+    ),
+    pytest.param(
+        OpenAIChatCompletion(),
+        OpenAIChatPromptExecutionSettings(
+            function_choice_behavior=FunctionChoiceBehavior.Required()
+        ),
+        True,
+        id="open_ai_tool_required"
+    ),
+    pytest.param(
+        OpenAIChatCompletion(),
+        OpenAIChatPromptExecutionSettings(
+            function_choice_behavior=FunctionChoiceBehavior.NoneInvoke()
+        ),
+        True,
+        id="open_ai_tool_none_invoke"
     ),
     pytest.param(
         AzureAIInferenceChatCompletion(ai_model_id="test"),

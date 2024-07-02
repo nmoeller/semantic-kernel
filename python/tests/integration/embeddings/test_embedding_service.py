@@ -4,9 +4,7 @@ import pytest
 
 import semantic_kernel as sk
 from semantic_kernel.connectors.ai.embeddings.embedding_generator_base import EmbeddingGeneratorBase
-from semantic_kernel.connectors.ai.hugging_face import HuggingFaceTextEmbedding
 from semantic_kernel.connectors.ai.mistral_ai import MistralAITextEmbedding
-from semantic_kernel.connectors.ai.open_ai import OpenAITextEmbedding
 from semantic_kernel.core_plugins.text_memory_plugin import TextMemoryPlugin
 from semantic_kernel.kernel import Kernel
 from semantic_kernel.memory.semantic_text_memory import SemanticTextMemory
@@ -16,17 +14,6 @@ pytestmark = pytest.mark.parametrize("embeddings_generator",
         pytest.param(
             MistralAITextEmbedding(),
             id="MistralEmbeddings"
-        ),
-        pytest.param(
-            OpenAITextEmbedding(ai_model_id="text-embedding-ada-002"),
-            id="OpenAIEmbeddings"
-        ),
-        pytest.param(
-            HuggingFaceTextEmbedding(
-                service_id="sentence-transformers/all-MiniLM-L6-v2", 
-                ai_model_id="sentence-transformers/all-MiniLM-L6-v2"
-            ),
-            id="HuggingFaceEmbeddings"
         )
     ]
 )

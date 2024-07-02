@@ -31,7 +31,7 @@ def test_conversation_summary_plugin_with_deprecated_value(kernel):
 async def test_summarize_conversation(kernel: Kernel):
     service = AsyncMock(spec=ChatCompletionClientBase)
     service.service_id = "default"
-    service.get_chat_message_contents = AsyncMock(
+    service.invoke = AsyncMock(
         return_value=[ChatMessageContent(role="assistant", content="Hello World!")]
     )
     service.get_prompt_execution_settings_from_settings = Mock(return_value=PromptExecutionSettings())
@@ -44,4 +44,4 @@ async def test_summarize_conversation(kernel: Kernel):
 
     await kernel.invoke(plugin_name="summarizer", function_name="SummarizeConversation", arguments=args)
     args["summary"] == "Hello world"
-    service.get_chat_message_contents.assert_called_once()
+    service.invoke.assert_called_once()

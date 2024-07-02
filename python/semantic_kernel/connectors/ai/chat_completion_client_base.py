@@ -7,8 +7,10 @@ from functools import reduce
 from typing import TYPE_CHECKING, Any
 
 from semantic_kernel.connectors.ai.function_call_behavior import (
+    FunctionCallBehavior,
     FunctionCallConfiguration,
 )
+from semantic_kernel.connectors.ai.function_choice_behavior import FunctionChoiceBehavior
 from semantic_kernel.contents.function_call_content import FunctionCallContent
 from semantic_kernel.contents.streaming_chat_message_content import StreamingChatMessageContent
 from semantic_kernel.exceptions import (
@@ -183,7 +185,7 @@ class ChatCompletionClientBase(AIServiceClientBase, ABC):
         arguments = kwargs.get("arguments", None)
         # loop for auto-invoke function calls
         for request_index in range(settings.function_choice_behavior.maximum_auto_invoke_attempts):
-            completions = await self.get_chat_message_contents(chat_history=chat_history, settings=settings, **kwargs)
+            completions = await self.get_chat_message_contents(chat_history, settings, **kwargs)
             # there is only one chat message, this was checked earlier
             chat_history.add_message(message=completions[0])
             # get the function call contents from the chat message
@@ -343,6 +345,13 @@ class ChatCompletionClientBase(AIServiceClientBase, ABC):
         
     def _check_for_function_calling_behavior(self, settings: "PromptExecutionSettings", **kwargs: Any) -> bool:
         """Check if function calling is enabled."""
+        if hasattr(settings, "function_call_behavior") and isinstance(
+            settings.function_call_behavior, FunctionCallBehavior
+        ):
+            settings.function_choice_behavior = FunctionChoiceBehavior.from_function_call_behavior(
+                settings.function_call_behavior
+            )
+
         if settings.function_choice_behavior is None:
             return False
         

@@ -94,7 +94,7 @@ async def test_azure_chat_completion_call_with_parameters(
     complete_prompt_execution_settings = AzureChatPromptExecutionSettings(service_id="test_service_id")
 
     azure_chat_completion = AzureChatCompletion()
-    await azure_chat_completion.get_chat_message_contents(
+    await azure_chat_completion.invoke(
         chat_history=chat_history, settings=complete_prompt_execution_settings, kernel=kernel
     )
     mock_create.assert_awaited_once_with(
@@ -118,7 +118,7 @@ async def test_azure_chat_completion_call_with_parameters_and_Logit_Bias_Defined
 
     azure_chat_completion = AzureChatCompletion()
 
-    await azure_chat_completion.get_chat_message_contents(
+    await azure_chat_completion.invoke(
         chat_history=chat_history, settings=complete_prompt_execution_settings, kernel=kernel
     )
 
@@ -211,7 +211,7 @@ async def test_azure_chat_completion_with_data_call_with_parameters(
 
     azure_chat_completion = AzureChatCompletion()
 
-    await azure_chat_completion.get_chat_message_contents(
+    await azure_chat_completion.invoke(
         chat_history=messages_in, settings=complete_prompt_execution_settings, kernel=kernel
     )
 
@@ -249,7 +249,7 @@ async def test_azure_chat_completion_call_with_data_parameters_and_function_call
         extra_body=extra,
     )
 
-    await azure_chat_completion.get_chat_message_contents(
+    await azure_chat_completion.invoke(
         chat_history=chat_history,
         settings=complete_prompt_execution_settings,
         kernel=kernel,
@@ -291,7 +291,7 @@ async def test_azure_chat_completion_call_with_data_with_parameters_and_Stop_Def
 
     azure_chat_completion = AzureChatCompletion()
 
-    await azure_chat_completion.get_chat_message_contents(
+    await azure_chat_completion.invoke(
         chat_history, complete_prompt_execution_settings, kernel=kernel
     )
 
@@ -353,7 +353,7 @@ async def test_azure_chat_completion_content_filtering_raises_correct_exception(
     azure_chat_completion = AzureChatCompletion()
 
     with pytest.raises(ContentFilterAIException, match="service encountered a content error") as exc_info:
-        await azure_chat_completion.get_chat_message_contents(
+        await azure_chat_completion.invoke(
             chat_history, complete_prompt_execution_settings, kernel=kernel
         )
 
@@ -396,7 +396,7 @@ async def test_azure_chat_completion_content_filtering_without_response_code_rai
     azure_chat_completion = AzureChatCompletion()
 
     with pytest.raises(ContentFilterAIException, match="service encountered a content error"):
-        await azure_chat_completion.get_chat_message_contents(
+        await azure_chat_completion.invoke(
             chat_history, complete_prompt_execution_settings, kernel=kernel
         )
 
@@ -418,7 +418,7 @@ async def test_azure_chat_completion_bad_request_non_content_filter(
     azure_chat_completion = AzureChatCompletion()
 
     with pytest.raises(ServiceResponseException, match="service failed to complete the prompt"):
-        await azure_chat_completion.get_chat_message_contents(
+        await azure_chat_completion.invoke(
             chat_history, complete_prompt_execution_settings, kernel=kernel
         )
 
@@ -443,9 +443,9 @@ async def test_azure_chat_completion_no_kernel_provided_throws_error(
 
     with pytest.raises(
         ServiceInvalidExecutionSettingsError,
-        match="The kernel is required for OpenAI tool calls.",
+        match="The kernel is required for tool calls",
     ):
-        await azure_chat_completion.get_chat_message_contents(chat_history, complete_prompt_execution_settings)
+        await azure_chat_completion.invoke(chat_history, complete_prompt_execution_settings)
 
 
 @pytest.mark.asyncio
@@ -468,6 +468,6 @@ async def test_azure_chat_completion_auto_invoke_false_no_kernel_provided_throws
 
     with pytest.raises(
         ServiceInvalidExecutionSettingsError,
-        match="The kernel is required for OpenAI tool calls.",
+        match="The kernel is required for tool calls",
     ):
-        await azure_chat_completion.get_chat_message_contents(chat_history, complete_prompt_execution_settings)
+        await azure_chat_completion.invoke(chat_history, complete_prompt_execution_settings)

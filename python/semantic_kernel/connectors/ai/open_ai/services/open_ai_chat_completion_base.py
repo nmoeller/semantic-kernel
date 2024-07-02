@@ -1,25 +1,16 @@
 # Copyright (c) Microsoft. All rights reserved.
 
-import asyncio
 import logging
 from collections.abc import AsyncGenerator
-from functools import reduce
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from openai import AsyncStream
 from openai.types.chat.chat_completion import ChatCompletion, Choice
 from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 from openai.types.chat.chat_completion_chunk import Choice as ChunkChoice
-from typing_extensions import deprecated
 
 from semantic_kernel.connectors.ai.chat_completion_client_base import ChatCompletionClientBase
-from semantic_kernel.connectors.ai.function_call_behavior import FunctionCallBehavior
-from semantic_kernel.connectors.ai.function_calling_utils import (
-    update_settings_from_function_call_configuration,
-)
-from semantic_kernel.connectors.ai.function_choice_behavior import (
-    FunctionChoiceBehavior,
-)
+from semantic_kernel.connectors.ai.function_choice_behavior import FunctionCallChoiceConfiguration
 from semantic_kernel.connectors.ai.open_ai.prompt_execution_settings.open_ai_prompt_execution_settings import (
     OpenAIChatPromptExecutionSettings,
 )
@@ -34,16 +25,9 @@ from semantic_kernel.contents.text_content import TextContent
 from semantic_kernel.contents.utils.author_role import AuthorRole
 from semantic_kernel.contents.utils.finish_reason import FinishReason
 from semantic_kernel.exceptions import (
-    ServiceInvalidExecutionSettingsError,
     ServiceInvalidResponseError,
 )
-from semantic_kernel.filters.auto_function_invocation.auto_function_invocation_context import (
-    AutoFunctionInvocationContext,
-)
-
-if TYPE_CHECKING:
-    from semantic_kernel.functions.kernel_arguments import KernelArguments
-    from semantic_kernel.kernel import Kernel
+from semantic_kernel.functions.kernel_function_metadata import KernelFunctionMetadata
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -65,29 +49,6 @@ class OpenAIChatCompletionBase(OpenAIHandler, ChatCompletionClientBase):
         """Create a request settings object."""
         return OpenAIChatPromptExecutionSettings
     
-    async def invoke(
-        self,
-        chat_history: "ChatHistory",
-        settings: "PromptExecutionSettings",
-        **kwargs: Any
-    ) -> list["ChatMessageContent"]:
-        """This method is called by the kernel to perform the chat completion and potentially execute function calls.
-
-        The Method calls the get_chat_message_contents method to get the response from the connector.
-        Then it checks the function calling behavior and executes the function calls if needed.
-
-        Args:
-            chat_history (ChatHistory): A list of chat chat_history, that can be rendered into a
-                set of chat_history, from system, user, assistant and function.
-            settings (PromptExecutionSettings): Settings for the request.
-            kwargs (Dict[str, Any]): The optional arguments.
-        
-        Returns:
-            List[Dict[str, Optional[str]]]: The prepared chat history.
-        """
-        # Override parent method to ensure not breaking something
-        return await self.get_chat_message_contents(chat_history, settings, **kwargs)
-
     async def get_chat_message_contents(
         self,
         chat_history: ChatHistory,
@@ -105,105 +66,14 @@ class OpenAIChatCompletionBase(OpenAIHandler, ChatCompletionClientBase):
         Returns:
             List[ChatMessageContent]: The completion result(s).
         """
-        # For backwards compatibility we need to convert the `FunctionCallBehavior` to `FunctionChoiceBehavior`
-        # if this method is called with a `FunctionCallBehavior` object as pat of the settings
-        if hasattr(settings, "function_call_behavior") and isinstance(
-            settings.function_call_behavior, FunctionCallBehavior
-        ):
-            settings.function_choice_behavior = FunctionChoiceBehavior.from_function_call_behavior(
-                settings.function_call_behavior
-            )
+        if not hasattr(settings, "ai_model_id"):
+            settings.ai_model_id = self.ai_model_id
 
-        kernel = kwargs.get("kernel", None)
-        arguments = kwargs.get("arguments", None)
-        if settings.function_choice_behavior is not None:
-            if kernel is None:
-                raise ServiceInvalidExecutionSettingsError("The kernel is required for OpenAI tool calls.")
-            if arguments is None and settings.function_choice_behavior.auto_invoke_kernel_functions:
-                raise ServiceInvalidExecutionSettingsError(
-                    "The kernel arguments are required for auto invoking OpenAI tool calls."
-                )
-            if settings.number_of_responses is not None and settings.number_of_responses > 1:
-                raise ServiceInvalidExecutionSettingsError(
-                    "Auto-invocation of tool calls may only be used with a "
-                    "OpenAIChatPromptExecutions.number_of_responses of 1."
-                )
-
-        # behavior for non-function calling or for enable, but not auto-invoke.
-        self._prepare_settings(settings, chat_history, stream_request=False, kernel=kernel)
-        if settings.function_choice_behavior is None or (
-            settings.function_choice_behavior and not settings.function_choice_behavior.auto_invoke_kernel_functions
-        ):
-            return await self._send_chat_request(settings)
-
-        # loop for auto-invoke function calls
-        for request_index in range(settings.function_choice_behavior.maximum_auto_invoke_attempts):
-            completions = await self._send_chat_request(settings)
-            # there is only one chat message, this was checked earlier
-            chat_history.add_message(message=completions[0])
-            # get the function call contents from the chat message
-            function_calls = [item for item in chat_history.messages[-1].items if isinstance(item, FunctionCallContent)]
-            if (fc_count := len(function_calls)) == 0:
-                return completions
-
-            logger.info(f"processing {fc_count} tool calls in parallel.")
-
-            # this function either updates the chat history with the function call results
-            # or returns the context, with terminate set to True
-            # in which case the loop will break and the function calls are returned.
-            results = await asyncio.gather(
-                *[
-                    self._process_function_call(
-                        function_call=function_call,
-                        chat_history=chat_history,
-                        kernel=kernel,
-                        arguments=arguments,
-                        function_call_count=fc_count,
-                        request_index=request_index,
-                        function_call_behavior=settings.function_choice_behavior,
-                    )
-                    for function_call in function_calls
-                ],
-            )
-
-            if any(result.terminate for result in results if result is not None):
-                return completions
-
-            self._update_settings(settings, chat_history, kernel=kernel)
-        else:
-            # do a final call, without function calling when the max has been reached.
-            settings.function_choice_behavior.auto_invoke_kernel_functions = False
-            return await self._send_chat_request(settings)
-
-    async def invoke_streaming(
-        self,
-        chat_history: ChatHistory,
-        settings: OpenAIChatPromptExecutionSettings,
-        **kwargs: Any,
-    ) -> AsyncGenerator[list[StreamingChatMessageContent | None], Any]:
-        """This method is called by the kernel to perform the chat completion and potentially execute function calls.
-
-        The Method calls the get_chat_message_contents method to get the response from the connector.
-        Then it checks the function calling behavior and executes the function calls if needed.
-
-        Args:
-            chat_history (ChatHistory): A list of chat chat_history, that can be rendered into a
-                set of chat_history, from system, user, assistant and function.
-            settings (PromptExecutionSettings): Settings for the request.
-            kwargs (Dict[str, Any]): The optional arguments.
-
-        Yields:
-            A stream representing the response(s) from the LLM.
-        """
-        # Override parent method to ensure not breaking something
-        async for message in self.get_streaming_chat_message_contents(
-            chat_history=chat_history,
-            settings=settings,
-            **kwargs
-        ):
-            yield message
-        return
-
+        settings.messages = self._prepare_chat_history_for_request(chat_history)
+        response = await self._send_request(request_settings=settings)
+        response_metadata = self._get_metadata_from_chat_response(response)
+        return [self._create_chat_message_content(response, choice, response_metadata) for choice in response.choices]
+    
     async def get_streaming_chat_message_contents(
         self,
         chat_history: ChatHistory,
@@ -222,123 +92,11 @@ class OpenAIChatCompletionBase(OpenAIHandler, ChatCompletionClientBase):
             List[StreamingChatMessageContent]: A stream of
                 StreamingChatMessageContent when using Azure.
         """
-        # For backwards compatibility we need to convert the `FunctionCallBehavior` to `FunctionChoiceBehavior`
-        # if this method is called with a `FunctionCallBehavior` object as part of the settings
-        if hasattr(settings, "function_call_behavior") and isinstance(
-            settings.function_call_behavior, FunctionCallBehavior
-        ):
-            settings.function_choice_behavior = FunctionChoiceBehavior.from_function_call_behavior(
-                settings.function_call_behavior
-            )
+        if not hasattr(settings, "ai_model_id"):
+            settings.ai_model_id = self.ai_model_id
 
-        kernel = kwargs.get("kernel", None)
-        arguments = kwargs.get("arguments", None)
-        if settings.function_choice_behavior is not None:
-            if kernel is None:
-                raise ServiceInvalidExecutionSettingsError("The kernel is required for OpenAI tool calls.")
-            if arguments is None and settings.function_choice_behavior.auto_invoke_kernel_functions:
-                raise ServiceInvalidExecutionSettingsError(
-                    "The kernel arguments are required for auto invoking OpenAI tool calls."
-                )
-            if settings.number_of_responses is not None and settings.number_of_responses > 1:
-                raise ServiceInvalidExecutionSettingsError(
-                    "Auto-invocation of tool calls may only be used with a "
-                    "OpenAIChatPromptExecutions.number_of_responses of 1."
-                )
-
-        # Prepare settings for streaming requests
-        self._prepare_settings(settings, chat_history, stream_request=True, kernel=kernel)
-
-        request_attempts = (
-            settings.function_choice_behavior.maximum_auto_invoke_attempts
-            if (settings.function_choice_behavior and settings.function_choice_behavior.auto_invoke_kernel_functions)
-            else 1
-        )
-        # hold the messages, if there are more than one response, it will not be used, so we flatten
-        for request_index in range(request_attempts):
-            all_messages: list[StreamingChatMessageContent] = []
-            function_call_returned = False
-            async for messages in self._send_chat_stream_request(settings):
-                for msg in messages:
-                    if msg is not None:
-                        all_messages.append(msg)
-                        if any(isinstance(item, FunctionCallContent) for item in msg.items):
-                            function_call_returned = True
-                yield messages
-
-            if (
-                settings.function_choice_behavior is None
-                or (
-                    settings.function_choice_behavior
-                    and not settings.function_choice_behavior.auto_invoke_kernel_functions
-                )
-                or not function_call_returned
-            ):
-                # no need to process function calls
-                # note that we don't check the FinishReason and instead check whether there are any tool calls,
-                # as the service may return a FinishReason of "stop" even if there are tool calls to be made,
-                # in particular if a required tool is specified.
-                return
-
-            # there is one response stream in the messages, combining now to create the full completion
-            # depending on the prompt, the message may contain both function call content and others
-            full_completion: StreamingChatMessageContent = reduce(lambda x, y: x + y, all_messages)
-            function_calls = [item for item in full_completion.items if isinstance(item, FunctionCallContent)]
-            chat_history.add_message(message=full_completion)
-
-            fc_count = len(function_calls)
-            logger.info(f"processing {fc_count} tool calls in parallel.")
-
-            # this function either updates the chat history with the function call results
-            # or returns the context, with terminate set to True
-            # in which case the loop will break and the function calls are returned.
-            # Exceptions are not caught, that is up to the developer, can be done with a filter
-            results = await asyncio.gather(
-                *[
-                    self._process_function_call(
-                        function_call=function_call,
-                        chat_history=chat_history,
-                        kernel=kernel,
-                        arguments=arguments,
-                        function_call_count=fc_count,
-                        request_index=request_index,
-                        function_call_behavior=settings.function_choice_behavior,
-                    )
-                    for function_call in function_calls
-                ],
-            )
-            if any(result.terminate for result in results if result is not None):
-                return
-
-            self._update_settings(settings, chat_history, kernel=kernel)
-
-    def _chat_message_content_to_dict(self, message: "ChatMessageContent") -> dict[str, str | None]:
-        msg = super()._chat_message_content_to_dict(message)
-        if message.role == AuthorRole.ASSISTANT:
-            if tool_calls := getattr(message, "tool_calls", None):
-                msg["tool_calls"] = [tool_call.model_dump() for tool_call in tool_calls]
-            if function_call := getattr(message, "function_call", None):
-                msg["function_call"] = function_call.model_dump_json()
-        if message.role == AuthorRole.TOOL:
-            if tool_call_id := getattr(message, "tool_call_id", None):
-                msg["tool_call_id"] = tool_call_id
-            if message.metadata and "function" in message.metadata:
-                msg["name"] = message.metadata["function_name"]
-        return msg
-
-    # endregion
-    # region internal handlers
-
-    async def _send_chat_request(self, settings: OpenAIChatPromptExecutionSettings) -> list["ChatMessageContent"]:
-        """Send the chat request."""
-        response = await self._send_request(request_settings=settings)
-        response_metadata = self._get_metadata_from_chat_response(response)
-        return [self._create_chat_message_content(response, choice, response_metadata) for choice in response.choices]
-
-    async def _send_chat_stream_request(
-        self, settings: OpenAIChatPromptExecutionSettings
-    ) -> AsyncGenerator[list["StreamingChatMessageContent | None"], None]:
-        """Send the chat stream request."""
+        settings.stream = True
+        settings.messages = self._prepare_chat_history_for_request(chat_history)
         response = await self._send_request(request_settings=settings)
         if not isinstance(response, AsyncStream):
             raise ServiceInvalidResponseError("Expected an AsyncStream[ChatCompletionChunk] response.")
@@ -351,6 +109,7 @@ class OpenAIChatCompletionBase(OpenAIHandler, ChatCompletionClientBase):
             ]
 
     # endregion
+
     # region content creation
 
     def _create_chat_message_content(
@@ -448,63 +207,36 @@ class OpenAIChatCompletionBase(OpenAIHandler, ChatCompletionClientBase):
         ]
 
     # endregion
-    # region request preparation
+    # region function calling conifg
 
-    def _prepare_settings(
+    def update_settings_from_function_call_configuration(
         self,
-        settings: OpenAIChatPromptExecutionSettings,
-        chat_history: ChatHistory,
-        stream_request: bool = False,
-        kernel: "Kernel | None" = None,
+        function_choice_configuration: "FunctionCallChoiceConfiguration",
+        settings: "OpenAIChatPromptExecutionSettings",
+        type: str,
     ) -> None:
-        """Prepare the prompt execution settings for the chat request."""
-        settings.stream = stream_request
-        if not settings.ai_model_id:
-            settings.ai_model_id = self.ai_model_id
-        self._update_settings(settings=settings, chat_history=chat_history, kernel=kernel)
+        """Update the settings from a FunctionChoiceConfiguration."""
+        if function_choice_configuration.available_functions:
+            settings.tool_choice = type
+            settings.tools = [
+                self.kernel_function_metadata_to_function_call_format(f)
+                for f in function_choice_configuration.available_functions
+            ]
 
-    def _update_settings(
+    def kernel_function_metadata_to_function_call_format(
         self,
-        settings: OpenAIChatPromptExecutionSettings,
-        chat_history: ChatHistory,
-        kernel: "Kernel | None" = None,
-    ) -> None:
-        """Update the settings with the chat history."""
-        settings.messages = self._prepare_chat_history_for_request(chat_history)
-        if settings.function_choice_behavior and kernel:
-            settings.function_choice_behavior.configure(
-                kernel=kernel,
-                update_settings_callback=update_settings_from_function_call_configuration,
-                settings=settings,
-            )
-
-    # endregion
-    # region function calling
-
-    @deprecated("Use `invoke_function_call` from the kernel instead with `FunctionChoiceBehavior`.")
-    async def _process_function_call(
-        self,
-        function_call: FunctionCallContent,
-        chat_history: ChatHistory,
-        kernel: "Kernel",
-        arguments: "KernelArguments",
-        function_call_count: int,
-        request_index: int,
-        function_call_behavior: FunctionChoiceBehavior | FunctionCallBehavior,
-    ) -> "AutoFunctionInvocationContext | None":
-        """Processes the tool calls in the result and update the chat history."""
-        if isinstance(function_call_behavior, FunctionCallBehavior):
-            # We need to still support a `FunctionCallBehavior` input so it doesn't break current
-            # customers. Map from `FunctionCallBehavior` -> `FunctionChoiceBehavior`
-            function_call_behavior = FunctionChoiceBehavior.from_function_call_behavior(function_call_behavior)
-
-        return await kernel.invoke_function_call(
-            function_call=function_call,
-            chat_history=chat_history,
-            arguments=arguments,
-            function_call_count=function_call_count,
-            request_index=request_index,
-            function_behavior=function_call_behavior,
-        )
-
-    # endregion
+        metadata: KernelFunctionMetadata,
+    ) -> dict[str, Any]:
+        """Convert the kernel function metadata to function calling format."""
+        return {
+            "type": "function",
+            "function": {
+                "name": metadata.fully_qualified_name,
+                "description": metadata.description or "",
+                "parameters": {
+                    "type": "object",
+                    "properties": {param.name: param.schema_data for param in metadata.parameters if param.is_required},
+                    "required": [p.name for p in metadata.parameters if p.is_required],
+                },
+            },
+        }

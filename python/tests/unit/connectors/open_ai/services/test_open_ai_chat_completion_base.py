@@ -14,11 +14,7 @@ from semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion impo
 from semantic_kernel.contents import AuthorRole, ChatMessageContent, StreamingChatMessageContent, TextContent
 from semantic_kernel.contents.chat_history import ChatHistory
 from semantic_kernel.contents.function_call_content import FunctionCallContent
-from semantic_kernel.exceptions import FunctionCallInvalidArgumentsException
-from semantic_kernel.functions.function_result import FunctionResult
 from semantic_kernel.functions.kernel_arguments import KernelArguments
-from semantic_kernel.functions.kernel_function import KernelFunction
-from semantic_kernel.functions.kernel_function_metadata import KernelFunctionMetadata
 from semantic_kernel.kernel import Kernel
 
 
@@ -37,11 +33,7 @@ async def test_complete_chat_stream(kernel: Kernel):
 
     with (
         patch(
-            "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion_base.OpenAIChatCompletionBase._prepare_settings",
-            return_value=settings,
-        ) as prepare_settings_mock,
-        patch(
-            "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion_base.OpenAIChatCompletionBase._send_chat_stream_request",
+            "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion_base.OpenAIChatCompletionBase.get_streaming_chat_message_contents",
             return_value=mock_response,
         ) as mock_send_chat_stream_request,
     ):
@@ -49,13 +41,12 @@ async def test_complete_chat_stream(kernel: Kernel):
             ai_model_id="test_model_id", service_id="test", client=MagicMock(spec=AsyncOpenAI)
         )
 
-        async for content in chat_completion_base.get_streaming_chat_message_contents(
+        async for content in chat_completion_base.invoke_streaming(
             chat_history, settings, kernel=kernel, arguments=arguments
         ):
             assert content is not None
 
-        prepare_settings_mock.assert_called_with(settings, chat_history, stream_request=True, kernel=kernel)
-        mock_send_chat_stream_request.assert_called_with(settings)
+        mock_send_chat_stream_request.assert_called_with(chat_history, settings, kernel=kernel, arguments=arguments)
 
 
 @pytest.mark.parametrize("tool_call", [False, True])
@@ -83,14 +74,11 @@ async def test_complete_chat_function_call_behavior(tool_call, kernel: Kernel):
 
     with (
         patch(
-            "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion_base.OpenAIChatCompletionBase._prepare_settings",
-        ) as prepare_settings_mock,
-        patch(
-            "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion_base.OpenAIChatCompletionBase._send_chat_request",
+            "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion_base.OpenAIChatCompletionBase.get_chat_message_contents",
             return_value=mock_message_content,
-        ) as mock_send_chat_request,
+        ),
         patch(
-            "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion_base.OpenAIChatCompletionBase._process_function_call",
+            "semantic_kernel.kernel.Kernel.invoke_function_call",
             new_callable=AsyncMock,
         ) as mock_process_function_call,
     ):
@@ -98,13 +86,11 @@ async def test_complete_chat_function_call_behavior(tool_call, kernel: Kernel):
             ai_model_id="test_model_id", service_id="test", client=MagicMock(spec=AsyncOpenAI)
         )
 
-        result = await chat_completion_base.get_chat_message_contents(
+        result = await chat_completion_base.invoke(
             chat_history, settings, kernel=kernel, arguments=arguments
         )
 
         assert result is not None
-        prepare_settings_mock.assert_called_with(settings, chat_history, stream_request=False, kernel=kernel)
-        mock_send_chat_request.assert_called_with(settings)
 
         if tool_call:
             mock_process_function_call.assert_awaited()
@@ -129,21 +115,16 @@ async def test_complete_chat_function_choice_behavior(tool_call, kernel: Kernel)
     arguments = KernelArguments()
 
     if tool_call:
-        settings.function_choice_behavior = MagicMock(spec=FunctionChoiceBehavior.Auto)
-        settings.function_choice_behavior.auto_invoke_kernel_functions = True
-        settings.function_choice_behavior.maximum_auto_invoke_attempts = 5
+        settings.function_choice_behavior = FunctionChoiceBehavior.Auto()
         chat_history.messages = [mock_message]
 
     with (
         patch(
-            "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion_base.OpenAIChatCompletionBase._prepare_settings",
-        ) as prepare_settings_mock,
-        patch(
-            "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion_base.OpenAIChatCompletionBase._send_chat_request",
+            "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion_base.OpenAIChatCompletionBase.get_chat_message_contents",
             return_value=mock_message_content,
-        ) as mock_send_chat_request,
+        ) as mock_get_chat_message_contents,
         patch(
-            "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion_base.OpenAIChatCompletionBase._process_function_call",
+            "semantic_kernel.kernel.Kernel.invoke_function_call",
             new_callable=AsyncMock,
         ) as mock_process_function_call,
     ):
@@ -151,105 +132,14 @@ async def test_complete_chat_function_choice_behavior(tool_call, kernel: Kernel)
             ai_model_id="test_model_id", service_id="test", client=MagicMock(spec=AsyncOpenAI)
         )
 
-        result = await chat_completion_base.get_chat_message_contents(
+        result = await chat_completion_base.invoke(
             chat_history, settings, kernel=kernel, arguments=arguments
         )
 
         assert result is not None
-        prepare_settings_mock.assert_called_with(settings, chat_history, stream_request=False, kernel=kernel)
-        mock_send_chat_request.assert_called_with(settings)
+        mock_get_chat_message_contents.assert_called_with(chat_history, settings, kernel=kernel, arguments=arguments)
 
         if tool_call:
             mock_process_function_call.assert_awaited()
         else:
             mock_process_function_call.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_process_tool_calls():
-    tool_call_mock = MagicMock(spec=FunctionCallContent)
-    tool_call_mock.split_name_dict.return_value = {"arg_name": "arg_value"}
-    tool_call_mock.to_kernel_arguments.return_value = {"arg_name": "arg_value"}
-    tool_call_mock.name = "test_function"
-    tool_call_mock.arguments = {"arg_name": "arg_value"}
-    tool_call_mock.ai_model_id = None
-    tool_call_mock.metadata = {}
-    tool_call_mock.index = 0
-    tool_call_mock.parse_arguments.return_value = {"arg_name": "arg_value"}
-    tool_call_mock.id = "test_id"
-    result_mock = MagicMock(spec=ChatMessageContent)
-    result_mock.items = [tool_call_mock]
-    chat_history_mock = MagicMock(spec=ChatHistory)
-
-    func_mock = AsyncMock(spec=KernelFunction)
-    func_meta = KernelFunctionMetadata(name="test_function", is_prompt=False)
-    func_mock.metadata = func_meta
-    func_mock.name = "test_function"
-    func_result = FunctionResult(value="Function result", function=func_meta)
-    func_mock.invoke = MagicMock(return_value=func_result)
-    kernel_mock = MagicMock(spec=Kernel)
-    kernel_mock.auto_function_invocation_filters = []
-    kernel_mock.get_function.return_value = func_mock
-
-    async def construct_call_stack(ctx):
-        return ctx
-
-    kernel_mock.construct_call_stack.return_value = construct_call_stack
-    arguments = KernelArguments()
-
-    chat_completion_base = OpenAIChatCompletionBase(
-        ai_model_id="test_model_id", service_id="test", client=MagicMock(spec=AsyncOpenAI)
-    )
-
-    with patch("semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion_base.logger", autospec=True):
-        await chat_completion_base._process_function_call(
-            tool_call_mock,
-            chat_history_mock,
-            kernel_mock,
-            arguments,
-            1,
-            0,
-            FunctionCallBehavior.AutoInvokeKernelFunctions(),
-        )
-
-
-@pytest.mark.asyncio
-async def test_process_tool_calls_with_continuation_on_malformed_arguments():
-    tool_call_mock = MagicMock(spec=FunctionCallContent)
-    tool_call_mock.parse_arguments.side_effect = FunctionCallInvalidArgumentsException("Malformed arguments")
-    tool_call_mock.name = "test_function"
-    tool_call_mock.arguments = {"arg_name": "arg_value"}
-    tool_call_mock.ai_model_id = None
-    tool_call_mock.metadata = {}
-    tool_call_mock.index = 0
-    tool_call_mock.parse_arguments.return_value = {"arg_name": "arg_value"}
-    tool_call_mock.id = "test_id"
-    result_mock = MagicMock(spec=ChatMessageContent)
-    result_mock.items = [tool_call_mock]
-    chat_history_mock = MagicMock(spec=ChatHistory)
-
-    func_mock = MagicMock(spec=KernelFunction)
-    func_meta = KernelFunctionMetadata(name="test_function", is_prompt=False)
-    func_mock.metadata = func_meta
-    func_mock.name = "test_function"
-    func_result = FunctionResult(value="Function result", function=func_meta)
-    func_mock.invoke = AsyncMock(return_value=func_result)
-    kernel_mock = MagicMock(spec=Kernel)
-    kernel_mock.auto_function_invocation_filters = []
-    kernel_mock.get_function.return_value = func_mock
-    arguments = KernelArguments()
-
-    chat_completion_base = OpenAIChatCompletionBase(
-        ai_model_id="test_model_id", service_id="test", client=MagicMock(spec=AsyncOpenAI)
-    )
-
-    with patch("semantic_kernel.connectors.ai.function_calling_utils.logger", autospec=True):
-        await chat_completion_base._process_function_call(
-            tool_call_mock,
-            chat_history_mock,
-            kernel_mock,
-            arguments,
-            1,
-            0,
-            FunctionCallBehavior.AutoInvokeKernelFunctions(),
-        )

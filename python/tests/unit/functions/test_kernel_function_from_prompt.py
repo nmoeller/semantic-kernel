@@ -160,14 +160,14 @@ async def test_invoke_chat_stream(openai_unit_test_env):
 
     # This part remains unchanged - for synchronous mocking example
     with patch(
-        "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion.OpenAIChatCompletion.get_chat_message_contents"
+        "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion.OpenAIChatCompletion.invoke"
     ) as mock:
         mock.return_value = [ChatMessageContent(role=AuthorRole.ASSISTANT, content="test", metadata={})]
         result = await function.invoke(kernel=kernel)
         assert str(result) == "test"
 
     with patch(
-        "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion.OpenAIChatCompletion.get_streaming_chat_message_contents"
+        "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion.OpenAIChatCompletion.invoke_streaming"
     ) as mock:
         mock.return_value = [
             StreamingChatMessageContent(choice_index=0, role=AuthorRole.ASSISTANT, content="test", metadata={})
@@ -187,7 +187,7 @@ async def test_invoke_exception(openai_unit_test_env):
         prompt_execution_settings=PromptExecutionSettings(service_id="test"),
     )
     with patch(
-        "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion.OpenAIChatCompletion.get_chat_message_contents",
+        "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion.OpenAIChatCompletion.invoke",
         side_effect=Exception,
     ) as mock:
         mock.return_value = [ChatMessageContent(role=AuthorRole.ASSISTANT, content="test", metadata={})]
@@ -195,7 +195,7 @@ async def test_invoke_exception(openai_unit_test_env):
             await function.invoke(kernel=kernel)
 
     with patch(
-        "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion.OpenAIChatCompletion.get_streaming_chat_message_contents",
+        "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion.OpenAIChatCompletion.invoke_streaming",
         side_effect=Exception,
     ) as mock:
         mock.return_value = [
@@ -217,14 +217,14 @@ async def test_invoke_text(openai_unit_test_env):
         prompt_execution_settings=PromptExecutionSettings(service_id="test"),
     )
     with patch(
-        "semantic_kernel.connectors.ai.open_ai.services.open_ai_text_completion.OpenAITextCompletion.get_text_contents",
+        "semantic_kernel.connectors.ai.open_ai.services.open_ai_text_completion.OpenAITextCompletion.invoke",
     ) as mock:
         mock.return_value = [TextContent(text="test", metadata={})]
         result = await function.invoke(kernel=kernel)
         assert str(result) == "test"
 
     with patch(
-        "semantic_kernel.connectors.ai.open_ai.services.open_ai_text_completion.OpenAITextCompletion.get_streaming_text_contents",
+        "semantic_kernel.connectors.ai.open_ai.services.open_ai_text_completion.OpenAITextCompletion.invoke_streaming",
     ) as mock:
         mock.return_value = [TextContent(text="test", metadata={})]
         async for result in function.invoke_stream(kernel=kernel):
@@ -242,7 +242,7 @@ async def test_invoke_exception_text(openai_unit_test_env):
         prompt_execution_settings=PromptExecutionSettings(service_id="test"),
     )
     with patch(
-        "semantic_kernel.connectors.ai.open_ai.services.open_ai_text_completion.OpenAITextCompletion.get_text_contents",
+        "semantic_kernel.connectors.ai.open_ai.services.open_ai_text_completion.OpenAITextCompletion.invoke",
         side_effect=Exception,
     ) as mock:
         mock.return_value = [TextContent(text="test", metadata={})]
@@ -250,7 +250,7 @@ async def test_invoke_exception_text(openai_unit_test_env):
             await function.invoke(kernel=kernel)
 
     with patch(
-        "semantic_kernel.connectors.ai.open_ai.services.open_ai_text_completion.OpenAITextCompletion.get_streaming_text_contents",
+        "semantic_kernel.connectors.ai.open_ai.services.open_ai_text_completion.OpenAITextCompletion.invoke_streaming",
         side_effect=Exception,
     ) as mock:
         mock.return_value = []
@@ -273,7 +273,7 @@ async def test_invoke_defaults(openai_unit_test_env):
         prompt_execution_settings=PromptExecutionSettings(service_id="test"),
     )
     with patch(
-        "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion.OpenAIChatCompletion.get_chat_message_contents"
+        "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion.OpenAIChatCompletion.invoke"
     ) as mock:
         mock.return_value = [ChatMessageContent(role=AuthorRole.ASSISTANT, content="test", metadata={})]
         result = await function.invoke(kernel=kernel)
@@ -316,7 +316,7 @@ async def test_create_with_multiple_settings_one_service_registered(openai_unit_
         ),
     )
     with patch(
-        "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion.OpenAIChatCompletion.get_chat_message_contents"
+        "semantic_kernel.connectors.ai.open_ai.services.open_ai_chat_completion.OpenAIChatCompletion.invoke"
     ) as mock:
         mock.return_value = [ChatMessageContent(role=AuthorRole.ASSISTANT, content="test", metadata={})]
         result = await function.invoke(kernel=kernel)

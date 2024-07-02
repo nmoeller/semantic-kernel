@@ -5,7 +5,6 @@
 from unittest.mock import MagicMock
 
 import pytest
-from mistralai.async_client import MistralAsyncClient
 
 from semantic_kernel.connectors.ai.chat_completion_client_base import ChatCompletionClientBase
 from semantic_kernel.connectors.ai.mistral_ai.services.mistral_ai_chat_completion import MistralAIChatCompletion
@@ -22,7 +21,7 @@ async def test_complete_chat_stream_contents(kernel: Kernel):
     arguments = KernelArguments()
 
     chat_completion_base = MistralAIChatCompletion(
-        ai_model_id="test_model_id", service_id="test", api_key="", async_client=MagicMock(spec=MistralAsyncClient)
+        ai_model_id="test_model_id", service_id="test", api_key=""
     )
 
     async for content in chat_completion_base.get_streaming_chat_message_contents(
@@ -39,7 +38,7 @@ async def test_complete_chat_contents(kernel: Kernel):
     arguments = KernelArguments()
 
     chat_completion_base = MistralAIChatCompletion(
-        ai_model_id="test_model_id", service_id="test", api_key="", async_client=MagicMock(spec=MistralAsyncClient)
+        ai_model_id="test_model_id", service_id="test", api_key=""
     )
 
     content = await chat_completion_base.get_chat_message_contents(

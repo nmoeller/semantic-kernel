@@ -131,7 +131,7 @@ class MistralAIChatCompletion(ChatCompletionClientBase):
         self.store_usage(response)
         response_metadata = self._get_metadata_from_response(response)
         return [self._create_chat_message_content(response, choice, response_metadata) for choice in response.choices]
-        
+
     async def get_streaming_chat_message_contents(
         self,
         chat_history: ChatHistory,
